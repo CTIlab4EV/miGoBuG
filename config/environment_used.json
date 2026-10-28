@@ -1,0 +1,12 @@
+{
+ "python": "3.10.12 (main, Jun 22 2026, 18:55:27) [GCC 11.4.0]",
+ "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+ "processor": "x86_64",
+ "cpu_count": 32,
+ "numpy": "2.2.6",
+ "scipy": "1.15.3",
+ "numba": "0.66.0",
+ "numba_threads": 16,
+ "gurobi": "13.0.2",
+ "started": "2026-10-16 02:52:48"
+}
