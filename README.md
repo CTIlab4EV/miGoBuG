@@ -44,6 +44,10 @@ best bound, MIP gap, and runtime of the MINLP solved by Gurobi, the objective an
 miGoBuG with its switching sequence evaluated in the same benchmark model (`J_miGoBuG_ZOH`), and
 the MILP-PWL benchmarks with $L = 8, 16, 32$ segments.
 
+## License
+
+The contents of this repository are released under the MIT License (see `LICENSE`).
+
 ## Citation
 
 Please cite the paper above if you use these data.
