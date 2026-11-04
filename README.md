@@ -16,6 +16,16 @@ All methods are scored in one benchmark model, a convex mixed-integer quadratic 
 | **MILP-PWL** | the benchmark model with $L = 8, 16, 32$ piecewise-linear cost segments, with and without re-optimizing the dispatch of its switching sequence ("+ QP") |
 | **Heuristic baselines** | MS MINTOC, SUR NLP, and Adjoint NLP |
 
+The test system has five configurations, each solved on ten 72-hour datasets (50 cases):
+
+| Configuration | Grid nodes | Topologies $k$ |
+|---|---|---|
+| I | none (isolated) | 1 |
+| II | G1 | 2 |
+| III | G1, G2 | 4 |
+| IV | G1, G2, G3 | 8 |
+| V | G1, G2, G3, G4 | 16 |
+
 ## Contents
 
 | Path | Content |
@@ -25,7 +35,7 @@ All methods are scored in one benchmark model, a convex mixed-integer quadratic 
 | `baselines.py` | heuristic baselines |
 | `run_benchmarks.py` | runs the benchmark; all parameters are in `CFG` at the top |
 | `run_pwl_cases.py` | MILP-PWL for selected configurations |
-| `make_tables.py`, `make_figures.py`, `threshold_summary.py` | Tables III–V, Figs. 3–7, and the threshold of Appendix A from a results folder |
+| `make_tables.py`, `make_figures.py`, `threshold_summary.py` | LaTeX rows of Tables III–V, Figs. 3–7, and the threshold of Appendix A from a results folder |
 | `tuning/` | per-case selection of the continuation schedule |
 | `config/` | steps of every case, parameters and software of the reported run |
 | `data/load.csv` | net-load profile of the test system |
@@ -33,7 +43,7 @@ All methods are scored in one benchmark model, a convex mixed-integer quadratic 
 
 ## Installation
 
-Python 3.10 or newer:
+Tested with Python 3.10:
 
 ```bash
 pip install -r requirements.txt
@@ -56,6 +66,8 @@ python run_benchmarks.py --configs III --cases 3 --migobug-only --defer-fixedqp 
     --step-pref config/per_case_steps.csv --out results/quickstart
 ```
 
+The result is written to `results/quickstart/`. `J_miGoBuG_ZOH` stays empty because `--defer-fixedqp` skips the fixed-sequence QP; without this option, a Gurobi licence is needed.
+
 Tables and figures of the paper from the reference results:
 
 ```bash
@@ -63,6 +75,8 @@ python make_tables.py reference_results
 python make_figures.py reference_results
 python threshold_summary.py reference_results/threshold.csv
 ```
+
+`make_tables.py` writes `tables.tex` into the results folder, and `make_figures.py` writes to `figures/`.
 
 ## Reproducing the paper
 
@@ -72,7 +86,7 @@ python threshold_summary.py reference_results/threshold.csv
    python run_benchmarks.py --step-pref config/per_case_steps.csv --out results/main
    ```
 
-2. **MILP-PWL** for the other configurations, merged into `results/main/main.csv`:
+2. **MILP-PWL** for the other configurations, merged into `results/main/main.csv`. Each MILP is limited to 3600 s (`--pwl-limit`) and stops above 10 GB of memory (`--soft-mem-limit`):
 
    ```bash
    python run_pwl_cases.py --configs I II IV V --results results/main --out results/pwl_all
@@ -94,7 +108,7 @@ python threshold_summary.py reference_results/threshold.csv
    python make_figures.py results/main
    ```
 
-Gurobi's runtimes and, for instances stopped at the time limit, its incumbents and bounds depend on the machine and the Gurobi version. The reference results were obtained with Gurobi 13.0.2 (`config/environment_used.json`).
+Gurobi's runtimes and, for instances stopped at a limit, its incumbents and bounds depend on the machine and the Gurobi version. The reference results were obtained with Gurobi 13.0.2 (`config/environment_used.json`) on a desktop with an Intel Core i9-14900 CPU and 16 GB of RAM.
 
 ## Continuation schedule
 
@@ -104,7 +118,7 @@ The continuation runs from $\epsilon_\pi = 10^9$ downwards on a geometric schedu
 
 `data/load.csv` holds the net-load profile $P_{ld}$ of the test system in kW, i.e., the load that the storage units, the diesel generator, and the grid connections must cover. Columns: `day`, `step` (30-min interval within the day), and `p_net`.
 
-Every case covers three consecutive days (144 intervals), which gives ten cases from days 1 to 30. All parameters are in `CFG` of `run_benchmarks.py`, and `config/config_used.json` lists the values of the reported run.
+Every case covers three consecutive days (144 intervals), which gives ten datasets from days 1 to 30 (day 31 is incomplete and not used). All parameters are in `CFG` of `run_benchmarks.py`, and `config/config_used.json` lists the values of the reported run.
 
 ## Results
 
@@ -114,12 +128,16 @@ Every run folder contains:
 |---|---|
 | `main.csv` | one row per case, see below |
 | `config.json`, `environment.json` | parameters and software |
+| `step_preference.csv` | number of continuation steps used per case |
+| `grid_envelope.txt` | check that no grid node is dominated |
 | `traj/` | trajectories of miGoBuG (`*_miGoBuG.npz`) and of the MINLP (`*_MIQP.npz`) |
 | `conv/` | continuation log of every case |
 | `gurobi_logs/`, `progress/` | Gurobi logs, incumbent and bound over time |
 | `threshold.csv` | threshold of Appendix A, with `--threshold` |
 
-Main columns of `main.csv`:
+`reference_results/traj/` holds the miGoBuG trajectories of all 50 cases and the MINLP trajectories of Configuration I dataset 1, Configuration III dataset 3, and all of Configuration V.
+
+Main columns of `main.csv` (`MIQP` denotes the MINLP):
 
 | Column | Content |
 |---|---|
@@ -128,7 +146,7 @@ Main columns of `main.csv`:
 | `gap_certified_pct` | the same gap with respect to the MINLP best bound |
 | `MIQP_status`, `MIQP_time`, `MIQP_J_inc`, `MIQP_J_LB`, `MIQP_gap_pct` | MINLP status, runtime, incumbent, best bound, final MIP gap |
 | `MIQP_reused_from` | earlier run with the same model and settings that the MINLP result was taken from |
-| `PWL<L>_J_true`, `PWL<L>_J_seqQP`, `PWL<L>_time`, `PWL<L>_status` | MILP-PWL objective, without and with "+ QP", runtime, status |
+| `PWL<L>_J_true`, `PWL<L>_J_seqQP`, `PWL<L>_time`, `PWL<L>_status` | MILP-PWL objective, without and with "+ QP" (Table IV reports "+ QP" for $L = 16, 32$), runtime, status (`optimal`, `time_limit`, or `mem_limit`) |
 | `MINTOC_J`, `SUR_J`, `Adjoint_J`, `*_time` | heuristic baselines |
 | `bound_consistent` | the MINLP bound does not exceed the cost of any feasible solution found by any method; a necessary condition for a valid bound, not a proof |
 | `eps_pi_last`, `steps_used`, `failed_steps` | continuation of miGoBuG |
