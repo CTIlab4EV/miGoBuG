@@ -1,14 +1,14 @@
 #!/bin/bash
 # Per-case selection of the number of continuation steps (miGoBuG only, no Gurobi licence needed).
-# 1) every case is solved with schedules of 300-1400 steps (round 2: up to 2000 for cases without a run at the target)
+# 1) every case is solved with schedules of 300-1400 steps (second round: up to 2000 for cases without a run at the target)
 # 2) select_steps.py keeps, per case, the fastest schedule that ends at eps_pi <= TARGET
-# Output: config/per_case_steps.csv (the file shipped in config/ is the one used in the paper).
+# Output: tuning/out/per_case_steps.csv (the file in config/ is the one used in the paper).
 cd "$(dirname "$0")/.."
 PY=${PY:-python}
 TARGET=2e-5
 tune() {  # $1 steps, $2 configuration, $3 cases
   out=results/pcase_L$1_$2
-  $PY run_revision_benchmarks.py --exp main --configs $2 --cases $3 --migobug-only --defer-fixedqp --skip-condC \
+  $PY run_benchmarks.py --configs $2 --cases $3 --migobug-only --defer-fixedqp \
       --start-steps $1 --max-steps $1 --out $out > $out.log 2>&1
 }
 mkdir -p results tuning/out

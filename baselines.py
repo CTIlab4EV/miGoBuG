@@ -1,7 +1,7 @@
 """Heuristic baselines of the paper: MS MINTOC, SUR NLP and Adjoint NLP.
 
 Each one solves continuous relaxations of the benchmark model with Gurobi and returns a
-switching sequence; run_revision_benchmarks.run_baselines costs that sequence with the same
+switching sequence; run_benchmarks.run_baselines costs that sequence with the same
 fixed-sequence QP as every other method.
 """
 import time
@@ -10,18 +10,18 @@ import gurobipy as gp
 from gurobipy import GRB
 import numpy as np
 
-import miGoBuG_revision_patch as P
+import benchmark as P
 
 
 # ======================================================
 # HEURISTIC BASELINES (SUR, Hybrid PMP, MS MINTOC)
 # ======================================================
-# Bounds of the benchmark model (miGoBuG_revision_patch.Case); the drivers pass the case values.
+# Bounds of the benchmark model (benchmark.Case); the drivers pass the case values.
 BASELINE_BOUNDS = dict(P_s_ub=500.0, P_g_ub=2000.0, P_dg_lb=0.0, P_dg_ub=2000.0, U_ub=4000.0)
 
 
 def _relaxed_baseline_model(name, p_net, E_init, E_target, E_min, E_max, P_dg_init, S, Z, B, Delta,
-                            eta_s, eta_dg, eta_g, X_g, base_grid_costs, dt, bounds=None, n_blocks=None, blocks=None):
+                            eta_s, eta_dg, eta_g, X_g, base_grid_costs, dt, bounds=None, blocks=None):
     """Continuous relaxation of the benchmark model: same bounds, efficiencies and objective,
     topology weights x_c on the simplex, and the grid cost in perspective form per grid node,
     0.5*Delta_i*p_g^2 <= c_g * x_node.  The energy bounds are soft (penalized slacks), so every
@@ -84,7 +84,7 @@ def _relaxed_baseline_model(name, p_net, E_init, E_target, E_min, E_max, P_dg_in
     return m, V
 
 
-def _fix_and_resolve(m, V, seq_blocks, t_start, label):
+def _fix_and_resolve(m, V, seq_blocks, t_start):
     """Fix the topology weights to the chosen sequence (one topology per block) and re-solve."""
     for kb in range(V["nb"]):
         for k in range(V["nk"]):
@@ -98,7 +98,6 @@ def _fix_and_resolve(m, V, seq_blocks, t_start, label):
     m_star = np.zeros(N, dtype=int)
     for kb, (a, c) in enumerate(V["blocks"]):
         m_star[a:c] = seq_blocks[kb]
-    print(f"{label} Success: Solved in {t_total:.2f}s")
     return {"success": True,
             "p_s": np.array([[V["p_s"][j, t].X for t in range(N)] for j in range(ns)]),
             "p_dg": np.array([[V["p_dg"][j, t].X for t in range(N)] for j in range(nz)]),
@@ -127,10 +126,9 @@ def _qp_duals(m, V):
 
 
 # ======================================================
-# METHOD 3: SUR-SOS1 (combinatorial integral approximation by sum-up rounding)
+# SUR NLP: SUR-SOS1 (combinatorial integral approximation by sum-up rounding)
 # ======================================================
 def solve_ems_sur_sos1(p_net, E_init, E_target, E_min, E_max, P_dg_init, S, Z, B, Delta, eta_s, eta_dg, eta_g, X_g, base_grid_costs, dt, bounds=None):
-    print("\n--- Method 3: Starting SUR-SOS1 ---")
     t_start = time.time()
     m, V = _relaxed_baseline_model("SUR_relaxed", p_net, E_init, E_target, E_min, E_max, P_dg_init, S, Z, B, Delta,
                                    eta_s, eta_dg, eta_g, X_g, base_grid_costs, dt, bounds)
@@ -144,21 +142,20 @@ def solve_ems_sur_sos1(p_net, E_init, E_target, E_min, E_max, P_dg_init, S, Z, B
     for t in range(N):
         deficit = x_rel[:, :t + 1].sum(axis=1) - w[:, :t].sum(axis=1)
         w[np.argmax(deficit), t] = 1.0
-    return _fix_and_resolve(m, V, np.argmax(w, axis=0), t_start, "SUR-SOS1")
+    return _fix_and_resolve(m, V, np.argmax(w, axis=0), t_start)
 
 
 # ======================================================
-# METHOD 4: HYBRID PMP (direct NLP -> adjoints -> pointwise Hamiltonian minimization)
+# Adjoint NLP: hybrid PMP (direct NLP -> adjoints -> pointwise Hamiltonian minimization)
 # ======================================================
 def solve_ems_hybrid_pmp(p_net, E_init, E_target, E_min, E_max, P_dg_init, S, Z, B, Delta, eta_s, eta_dg, eta_g, X_g, base_grid_costs, dt, bounds=None):
-    print("\n--- Method 4: Starting Hybrid PMP (Adjoints) ---")
     t_start = time.time()
     m, V = _relaxed_baseline_model("Hybrid_relaxed", p_net, E_init, E_target, E_min, E_max, P_dg_init, S, Z, B, Delta,
                                    eta_s, eta_dg, eta_g, X_g, base_grid_costs, dt, bounds)
     m.optimize()
     if m.status != GRB.OPTIMAL:
         return {"success": False}
-    N, ns, nz, ng, nk = V["N"], V["ns"], V["nz"], V["ng"], V["nk"]
+    N, ns, nz, nk = V["N"], V["ns"], V["nz"], V["nk"]
     C_topo = X_g @ base_grid_costs
     pdg_traj = np.array([[V["p_dg"][j, t].X for t in range(N)] for j in range(nz)])
     _qp_duals(m, V)                     # exact duals of the dynamics at the relaxed solution
@@ -185,14 +182,13 @@ def solve_ems_hybrid_pmp(p_net, E_init, E_target, E_min, E_max, P_dg_init, S, Z,
             if H < best:
                 best, best_k = H, k
         m_star[t] = best_k
-    return _fix_and_resolve(m, V, m_star, t_start, "Hybrid PMP")
+    return _fix_and_resolve(m, V, m_star, t_start)
 
 
 # ======================================================
-# METHOD 5: MS MINTOC (adaptive control grid + penalty homotopy)
+# MS MINTOC (adaptive control grid + penalty homotopy)
 # ======================================================
 def solve_ems_ms_mintoc(p_net, E_init, E_target, E_min, E_max, P_dg_init, S, Z, B, Delta, eta_s, eta_dg, eta_g, X_g, base_grid_costs, dt, initial_steps_per_ms=4, bounds=None):
-    print("\n--- Method 5: MS MINTOC (Adaptive Grid + Penalty Homotopy) ---")
     t_start = time.time()
     N, nk = len(p_net), X_g.shape[0]
     C_topo = X_g @ base_grid_costs
@@ -234,4 +230,4 @@ def solve_ems_ms_mintoc(p_net, E_init, E_target, E_min, E_max, P_dg_init, S, Z, 
             break
         beta *= beta_inc
     x_val = np.array([[V["x_c"][k, kb].X for kb in range(V["nb"])] for k in range(nk)])
-    return _fix_and_resolve(m, V, np.argmax(x_val, axis=0), t_start, "MS MINTOC")
+    return _fix_and_resolve(m, V, np.argmax(x_val, axis=0), t_start)

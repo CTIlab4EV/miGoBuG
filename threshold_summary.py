@@ -1,7 +1,7 @@
-"""Summary of the regularization threshold of Appendix A from a condC.csv
-(written by run_revision_benchmarks.py --certify-condC).
+"""Summary of the regularization threshold of Appendix A from a threshold.csv
+(written by run_benchmarks.py --threshold).
 
-    python threshold_summary.py reference_results/threshold_condC.csv
+    python threshold_summary.py reference_results/threshold.csv
 
 For every case of Configurations II-V: eps_bar = max over the continuation of
 cert_eps_bar, and the smallest eps_pi down to which the convexity condition
@@ -13,7 +13,7 @@ import statistics as st
 import sys
 from collections import defaultdict
 
-path = sys.argv[1] if len(sys.argv) > 1 else "reference_results/threshold_condC.csv"
+path = sys.argv[1] if len(sys.argv) > 1 else "reference_results/threshold.csv"
 by = defaultdict(list)
 for r in csv.DictReader(open(path)):
     by[r["tag"]].append(r)

@@ -2,7 +2,7 @@
 
     python make_figures.py reference_results
 
-Writes figures_revised/:
+Writes figures/:
   Figs. 3-4  Results_ExecTime_*.svg/.pdf          execution time per dataset
   Figs. 5-7  Results_Benchmark_Config_<C>_*.svg/.pdf  trajectories (I: dataset 1, III: dataset 3, V: dataset 10)
   preview_*.png  stacked previews of Figs. 5-7, and the data plotted (*.csv)
@@ -19,10 +19,10 @@ import matplotlib.colors as mcolors
 from matplotlib.patches import Patch
 from matplotlib.ticker import ScalarFormatter
 
-import run_revision_benchmarks as R
+import run_benchmarks as R
 
-folder = Path(sys.argv[1] if len(sys.argv) > 1 else "results/final_pc")
-out = Path("figures_revised"); out.mkdir(exist_ok=True)
+folder = Path(sys.argv[1] if len(sys.argv) > 1 else "reference_results")
+out = Path("figures"); out.mkdir(exist_ok=True)
 rows = list(csv.DictReader(open(folder / "main.csv")))
 by = {(r["config"], int(r["case"])): r for r in rows}
 CFG = ["I", "II", "III", "IV", "V"]
@@ -59,7 +59,6 @@ with open(out / "runtimes.csv", "w", newline="") as f:
 
 tstyles = {'ALT_PMP': {'c': '#d1e5f0', 'h': '\\\\', 'lbl': 'miGoBuG'},
            'MIP':     {'c': '#fddbc7', 'h': 'o',    'lbl': 'MINLP'}}
-legend_patches_time = [Patch(facecolor=v['c'], edgecolor='black', hatch=v['h'], label=v['lbl']) for v in tstyles.values()]
 width_time = 0.25
 offsets_time_2 = np.array([-0.5, 0.5]) * width_time
 MIP_SCALE_I = 100                               # Configuration I: MINLP bars scaled for visibility
@@ -117,7 +116,7 @@ time_figure(["III", "IV", "V"], "Results_ExecTime_III_V")  # Fig. 4
 
 
 # =====================================================================
-# Figs. 5-7: trajectories (plot() of miGoBuG_plot.ipynb, separate figure per panel)
+# Figs. 5-7: trajectories (separate figure per panel, and all panels stacked)
 # =====================================================================
 def darken_color(color, factor=0.7):
     rgb = mcolors.to_rgb(color)
@@ -300,18 +299,10 @@ def plot(t_grid, p_net_full, pmp_data, mip_data, Eb_min, Eb_max, X_g, tag, stack
     return names
 
 
-def gurobi_traj(c, i):
-    """Gurobi solution of the final results: the row's MIQP was reused from an earlier run folder."""
-    src = by[(c, i)].get("MIQP_reused_from") or ""
-    run = Path(src).parent.name if src and src != "none (--migobug-only)" else folder.name
-    own = folder / "traj" / f"main_{c}_case{i}_MIQP.npz"
-    return np.load(own if own.exists() else Path("results") / run / "traj" / f"main_{c}_case{i}_MIQP.npz")
-
-
-cfg = dict(R.CFG); _, days = R.load_days(cfg); kd = cfg["days_per_case"]
+cfg = dict(R.CFG); days = R.load_days(cfg)
 for c, i in (("I", 1), ("III", 3), ("V", 10)):   # Figs. 5, 6 and 7
-    case = R.make_case(cfg, R.net_load(cfg, days[(i - 1) * kd: i * kd]), c)
-    G = gurobi_traj(c, i)
+    case = R.make_case(cfg, R.case_load(cfg, days, i), c)
+    G = np.load(folder / "traj" / f"main_{c}_case{i}_MIQP.npz")
     M = np.load(folder / "traj" / f"main_{c}_case{i}_miGoBuG.npz")
     N = M["e"].shape[1]
     t_grid = np.arange(N) * case.dt

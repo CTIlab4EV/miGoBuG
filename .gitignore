@@ -1,8 +1,7 @@
 __pycache__/
 *.pyc
 results/
-figures_revised/
-letter/
+figures/
 tuning/out/
 gurobi.lic
 *.lic

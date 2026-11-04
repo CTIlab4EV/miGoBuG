@@ -1,59 +1,8 @@
-import os
-import glob
+"""mi-Alt-PMP solver core: Numba kernels of the TPBVP and extraction of the switching sequence."""
 import numpy as np
-import matplotlib.pyplot as plt
-from scipy.integrate import solve_bvp
-import pandas as pd
 from numba import njit, prange
 import math
-import itertools
-import time
 
-
-@njit(cache=True, fastmath=True)
-def curvature_equidistribution(t_nodes, y_nodes, max_nodes=500):
-    if len(t_nodes) == max_nodes: return t_nodes, y_nodes
-    n_states = y_nodes.shape[0]
-    n_nodes = len(t_nodes)
-    dy_dt = np.zeros((n_states, n_nodes - 1), dtype=np.float64)
-    dt_diff = np.zeros(n_nodes - 1, dtype=np.float64)
-    for j in range(n_nodes - 1): dt_diff[j] = t_nodes[j+1] - t_nodes[j]
-    for i in range(n_states):
-        for j in range(n_nodes - 1): dy_dt[i, j] = abs((y_nodes[i, j+1] - y_nodes[i, j]) / dt_diff[j])
-    d2y_dt2 = np.zeros(n_nodes - 2, dtype=np.float64)
-    for i in range(n_states):
-        for j in range(n_nodes - 2):
-            dt_mid = (t_nodes[j+2] - t_nodes[j]) / 2.0
-            d2y_dt2[j] += abs((dy_dt[i, j+1] - dy_dt[i, j]) / dt_mid)
-    curvature = np.zeros(n_nodes - 1, dtype=np.float64)
-    if len(d2y_dt2) > 0:
-        curvature[1:-1] = d2y_dt2
-        curvature[0] = curvature[1]
-        curvature[-1] = curvature[-2]
-    alpha = 0.5 
-    slope_sum = np.zeros(n_nodes - 1, dtype=np.float64)
-    for i in range(n_states):
-        for j in range(n_nodes - 1): slope_sum[j] += dy_dt[i, j]
-    monitor = np.zeros(n_nodes - 1, dtype=np.float64)
-    for j in range(n_nodes - 1): monitor[j] = math.sqrt(1.0 + slope_sum[j]**2 + alpha * curvature[j]**2)
-    arc_length = np.zeros(n_nodes, dtype=np.float64)
-    for i in range(1, n_nodes): arc_length[i] = arc_length[i-1] + monitor[i-1] * dt_diff[i-1]
-    for i in range(n_nodes): arc_length[i] /= arc_length[-1]
-    target_arc = np.linspace(0.0, 1.0, max_nodes)
-    t_new = np.interp(target_arc, arc_length, t_nodes)
-    t_new = np.sort(t_new)
-    min_dt = 1e-5  
-    for i in range(1, len(t_new) - 1):
-        if t_new[i] <= t_new[i-1] + min_dt: t_new[i] = t_new[i-1] + min_dt
-    t_new[0] = t_nodes[0]
-    t_new[-1] = max(t_nodes[-1], t_new[-2] + min_dt)
-    y_new = np.empty((n_states, max_nodes), dtype=np.float64)
-    for i in range(n_states): y_new[i, :] = np.interp(t_new, t_nodes, y_nodes[i, :])
-    return t_new, y_new
-
-@njit(cache=True, fastmath=True)
-def smoothed_max(x, delta=1e-3):
-    return 0.5 * (math.sqrt(x**2 + delta) + x)
 
 # ======================================================
 # EXACT PMP SOLVER CORE [mi-Alt-PMP]
@@ -306,52 +255,6 @@ def jitted_extract_core(p_net, lam_e_prof, p_dg_prof, S, Delta, eta_s, eta_dg, e
 
     return Ps_final, Pg_final, m_star
 
-
-def solve_ems_n_sources(p_net, time_arr, E_init, E_target, E_min, E_max, P_dg_init, S_diag, Z_diag, B_diag, Delta_diag, eta_s, eta_dg, eta_g, X_g, C_grd, dt, eps_array=None):
-    num_s = len(E_init)
-    num_z = len(P_dg_init)
-    t_nodes = time_arr.copy().astype(np.float64)
-    y_guess = np.zeros((2*num_s + 2*num_z, len(t_nodes)), dtype=np.float64)
-    
-    for j in range(num_s): y_guess[j, :] = E_init[j]
-    for j in range(num_z): y_guess[num_s+j, :] = P_dg_init[j]
-    
-    epsilons = eps_array if eps_array is not None else np.logspace(6, -9, 1000) 
-    final_sol = None
-    
-    def bvp_bc(ya, yb): return jitted_bc(ya, yb, E_init, E_target, P_dg_init)
-
-    for idx, eps in enumerate(epsilons):
-        inv_eps = -1.0 / max(eps, 1e-2)  
-        eps_softmax = eps * 1e4
-        
-        def bvp_ode(t, y):
-            return jitted_ode_n_sources(t, y, p_net, E_min, E_max, S_diag, Z_diag, B_diag, Delta_diag, eta_s, eta_dg, eta_g, X_g, C_grd, inv_eps, eps_softmax, dt)
-        
-        def bvp_jacobian(t, y):
-            return jitted_jacobian_n_sources(t, y, p_net, E_min, E_max, S_diag, Z_diag, B_diag, Delta_diag, eta_s, eta_dg, eta_g, X_g, C_grd, inv_eps, eps_softmax, dt)
-        
-        if eps_softmax > 5e3:
-            tol = 10.0
-        elif eps_softmax > 1e-2:
-            tol = 5.0
-        else:
-            tol = 15.0 
-            
-        sol = solve_bvp(bvp_ode, bvp_bc, t_nodes, y_guess, fun_jac=bvp_jacobian, tol=tol, max_nodes=50000)
-        viol = 0.0
-        
-        if sol.success:
-            nodes = len(sol.x)
-            for j in range(num_s): 
-                viol = max(viol, np.max(sol.y[j, :] - E_max[j]), np.max(E_min[j] - sol.y[j, :]), 0.0)
-            t_nodes, y_guess = sol.x, sol.y
-            if eps_array is None:
-                print(f"Alt-PMP | Temp: {eps_softmax:.1e} | Nodes: {nodes:<4} | Viol: {viol:.4f}")
-            final_sol = sol
-            eps*=0.65
-            
-    return final_sol
 
 def extract_pmp_trajectories(sol, time_cycle, p_net_full, num_s, num_z, S_diag, Delta_diag, eta_s, eta_dg, eta_g, X_g, C_grd):
     y_eval = sol.sol(time_cycle)
