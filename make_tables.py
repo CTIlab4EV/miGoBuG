@@ -97,8 +97,12 @@ for c in CONFIGS:
     k = R[0]["k"]
     binaries = "--" if c == "I" else str(int(k) * 144)
     trange = "3600" if min(tm) >= 3600 else f"{ft(min(tm))}--{ft(max(tm))}"
-    table5.append(f"{c} & {k} & {binaries} & {opt} / {10 - opt} & {trange} & {max(num(r, 'MIQP_gap_pct') for r in R):.2f} & "
-                  f"{st.median(tot):.1f} ({max(tot):.1f}) & {fx(st.median(d), 3)} ({fx(max(d), 3)})\\\\")
+    # bold: the method with the shorter median execution time
+    minlp_best = st.median(tm) < st.median(tot)
+    t_minlp = f"\\textbf{{{trange}}}" if minlp_best else trange
+    t_mig = f"{st.median(tot):.1f}" if minlp_best else f"\\textbf{{{st.median(tot):.1f}}}"
+    table5.append(f"{c} & {k} & {binaries} & {opt} / {10 - opt} & {t_minlp} & {max(num(r, 'MIQP_gap_pct') for r in R):.2f} & "
+                  f"{t_mig} ({max(tot):.1f}) & {fx(st.median(d), 3)} ({fx(max(d), 3)})\\\\")
 
 tex = ["% Table III", *table3, "", "% Table IV", *table4, "", "% Table V", *table5, ""]
 (folder / "tables.tex").write_text("\n".join(tex))
