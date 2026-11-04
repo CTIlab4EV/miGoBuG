@@ -1,21 +1,19 @@
 """
 run_revision_benchmarks.py
 ==========================
-Runs every experiment requested in the TSG review and logs the raw data.
+Runs the experiments of the paper and logs the raw data.
 
-    Experiment      Reviewer comments        Output (results/<run>/)
-    -------------   ----------------------   ---------------------------------
-    main            R1.1-1.3, R2.3, R3.4     main.csv  (Tables III, IV, VI)
-                    R2.1/R3.1 (cond. (C))    condC.csv, conv/*.csv, traj/*.npz
-    horizon         R1.4, R3.5               horizon.csv (Table V)
-    topology        R2.2, R3.3, R3.5         topology.csv (Table VII)
-    sensitivity     R3.6                     sensitivity.csv (Table VIII)
-    always          R1.8                     config.json, environment.json,
-                                             data_profiles.csv, data_stats.csv
+    Experiment      Output (results/<run>/)
+    -------------   ---------------------------------
+    main            main.csv, condC.csv, conv/*.csv, traj/*.npz
+    horizon         horizon.csv
+    topology        topology.csv
+    sensitivity     sensitivity.csv
+    always          config.json, environment.json,
+                    data_profiles.csv, data_stats.csv
 
 Every Gurobi run writes its full log to gurobi_logs/ and its incumbent/bound
-progress to progress/ (R1.3: "why does a problem of this size not converge
-fast?").  Rows are appended as soon as they finish, so the script can be
+progress to progress/.  Rows are appended as soon as they finish, so the script can be
 stopped and restarted: finished rows are skipped (--resume, default on).
 
 Requirements: miGoBuG.py and miGoBuG_revision_patch.py in the same folder.
@@ -78,17 +76,17 @@ CFG = dict(
     # grid configurations.
     #
     # Fixed connection cost of node i:  c_i = 0.5*Delta_i*(b_i*mean(P_net))^2
-    # (break-even rule of the old code: connecting node i pays off once the
+    # (break-even rule: connecting node i pays off once the
     # power it would carry exceeds about b_i*mean(P_net)).
     #
-    # IV and V (larger-scale cases, R3.5) use nodes with a deliberate
+    # IV and V (larger-scale cases) use nodes with a deliberate
     # TRADE-OFF between fixed and energy cost, so that no node dominates and
     # the optimal topology changes with the load level:
     #   G1 main feeder   Delta 0.65  eta 0.95  b 0.60   (reference, as in II)
     #   G2 weak tie      Delta 0.95  eta 0.93  b 0.45   cheap to connect, expensive per kWh^2
     #   G3 strong tie    Delta 0.45  eta 0.97  b 0.80   expensive to connect, cheap per kWh^2
     #   G4 backbone tie  Delta 0.38  eta 0.98  b 0.95   most expensive to connect, cheapest per kWh^2
-    # run3 used G4 = (0.80, 0.96, 0.55): both its fixed cost and its cost per
+    # An earlier node set used G4 = (0.80, 0.96, 0.55): both its fixed cost and its cost per
     # kWh^2 exceed G1's, so it was strictly dominated (never used; Config V
     # was Config IV).  P.grid_envelope() checks this at start-up: every node
     # must lie on the lower cost envelope of the grid topologies.  With the
@@ -117,8 +115,8 @@ CFG = dict(
     tol_fallback=None,                 # retry a failed step once with this (looser) tolerance
     cont_max_nodes=5000,               # default; overridden per k by cont_by_k below
     #
-    # Continuation settings per number of topologies k (one rule per problem
-    # size, never per case -> R3.6).  Config I: k=1, II: 2, III: 4, IV: 8, V: 16;
+    # Continuation settings per number of topologies k (the number of steps can
+    # be set per case with --step-pref).  Config I: k=1, II: 2, III: 4, IV: 8, V: 16;
     # the topology study uses k=32.  Keys missing for a k are inherited from
     # the largest listed k below it.
     #   steps        continuation steps (np.logspace(start, stop, steps));
@@ -150,7 +148,7 @@ CFG = dict(
     #             all 16 rows of the first fast run.)
     # Both: step rejection (realized KL > 4 kappa or state change > 4 delta)
     #       and a secant predictor (reject_factor, secant).
-    profile="run3",                    # session 16: the paper reports the run3 method
+    profile="run3",                    # the method reported in the paper
     # Profile per number of topologies k; overrides `profile` unless --profile
     # is given.  k = 1, 2, 4 are Configurations I, II, III: they use the loop of
     # the original miGoBuG.py (solve_ems_n_sources).
@@ -186,7 +184,7 @@ CFG = dict(
                       tol_schedule=[[5e3, 10.0], [1e-2, 5.0], [-1e300, 15.0]], bc_tol=None,
                       tol_fallback=None, mesh_reset=False, max_nodes=500, mesh_density=1,
                       final_tighten=None, polish=False, max_consecutive_fail=70),
-        # run3 method (reported in the paper, Response 3.6 / Algorithm 1):
+        # method reported in the paper (Algorithm 1):
         # geometric schedule, 1000 steps for every k, per-target halving up to
         # 6 times, solve_bvp tol 10 / 5 / 15, bc_tol = tol, no extra retries
         run3=dict(step_control="per_target", steps=1000, max_halvings=6,
@@ -201,7 +199,6 @@ CFG = dict(
         fast=dict(tol_schedule=[[-1e300, 1.0]], mesh_density=1, final_tighten=None,
                   polish_max_nodes=5000, max_nodes=10000),
         # same + re-solve at the final eps with tol 0.3 -> 0.1 before polishing
-        # (session 8: II/1 116 s instead of 3.5 s, and the tightening still failed)
         fast_tight=dict(tol_schedule=[[-1e300, 1.0]], mesh_density=1, final_tighten=[0.3, 0.1]),
     ),
     cont_by_k={
@@ -215,8 +212,6 @@ CFG = dict(
         16: dict(steps=4000, max_nodes=40000),
         32: dict(steps=5000, max_nodes=50000),
     },
-    # >>> set step_control / max_halvings / mesh_reset / tol_fallback from
-    #     diagnose_stalls.py, then keep them fixed for every case (R3.6).
     bvp_tol_schedule=None,             # None = original (10/5/15); e.g. [[5e3,1e-1],[1e-2,1e-2],[-1e300,1e-2]]
     polish_tol=1e-3,
     condC_every=50,                    # continuation steps between (C) snapshots
@@ -229,16 +224,17 @@ CFG = dict(
     # this changes only where nodes are stored, not the search.
     miqp_extra_params=dict(NodefileStart=2.0, NodefileDir="/tmp/gurobi_nodes"),
     numeric_focus_retry=2,             # re-solve with NumericFocus=2 if status is not optimal/time_limit
-    # MIQP formulation (session 14).  Tested on 240 small random instances
+    # MIQP formulation.  Tested on 240 small random instances
     # against the best feasible solution of all variants:
-    #   run3 (topology binaries, NumericFocus 0): bound above the optimum in
+    #   topology binaries, NumericFocus 0: bound above the optimum in
     #        6/240 (up to 0.25 %) -> Gurobi claimed "optimal" for a worse solution
     #   switch binaries + c_g upper bound:       1/240 (0.046 %), 40 % faster
-    #   switch + c_g ub + NumericFocus 3:        0/240, time = run3 formulation
+    #   switch + c_g ub + NumericFocus 3:        0/240, time = topology binaries
     # Binaries per interval: g instead of k = 2^g (exact: all combinations
     # admissible, additive connection costs; same continuous relaxation).
-    # Session 15 decision: keep the run3 formulation (documented, perspective,
-    # reusable run3 rows); the validated one is available for later.
+    # The reported results use topology binaries with the perspective grid cost;
+    # every reported bound is compared with the best feasible solution of all
+    # methods (bound_consistent in main.csv).  miqp_binaries selects the variant.
     miqp_binaries="topology", miqp_cg_ub=False, miqp_numeric_focus=0,
     threads=None, pwl_Ls=[8, 16, 32], pwl_configs=["III"],
     # --redo-pwl re-solves only these L on rows whose Gurobi results are reused
@@ -318,7 +314,7 @@ def cont_settings(cfg, k):
     """Continuation settings for a problem with k topologies (cfg['cont_by_k'],
     inherited upwards: k=8 gets the k=1/k=2 tolerances unless it overrides them)."""
     s = dict(steps=cfg["eps_schedule"]["steps"], kappa=0.01, delta_state=0.05,
-             # secant OFF: A/B on II/1 (session 10) -- 8 failed secant guesses cost
+             # secant OFF: A/B test on Configuration II, dataset 1 -- 8 failed secant guesses cost
              # 42 s (84.7 s vs 4.1 s); with all additions 17 failures, 101 s.
              # kl_measure "max": run B of the A/B test (fastest, 2.5 s on II/1)
              reject_factor=4.0, secant=False, final_tighten=None, kl_measure="max",
@@ -648,7 +644,7 @@ def run_miqp(case, cfg, out, tag, env, pwl_L=None, limit=None):
     nf = cfg.get("numeric_focus_retry", 0)
     # mem_limit (SoftMemLimit) is not numerical trouble: a re-solve would hit the same limit
     if nf and nf > nf0 and r["status_str"] not in P.VALID_MIQP_STATUS and r["status_str"] != "mem_limit":
-        # e.g. status 13 (SUBOPTIMAL) in run3, V/1: the bound exceeded two
+        # e.g. status 13 (SUBOPTIMAL) in an earlier run: the bound exceeded two
         # feasible solutions, i.e. it was not valid.  Re-solve once, record it.
         say(f"   status {r['status_str']} -> re-solving with NumericFocus={nf}")
         first = r["status_str"]
@@ -709,7 +705,7 @@ def _reuse_match(prev, case, cfg):
                              eta_g=case.eta_g.round(6).tolist()))
     try:
         fp = prev.get("grid_fingerprint")
-        # rows written before the fingerprint existed (run3: I, II, III/1-3)
+        # rows written before the fingerprint existed
         # have NaN here -> rely on the exact match of the grid costs
         same_fp = (not isinstance(fp, str)) or fp == fp_now
         pc = json.loads(prev["grid_costs"])
@@ -795,7 +791,7 @@ def _bound_check(row):
 def pwl_columns(case, r, L, J_LB, env):
     """MILP-PWL row entries.  J_true: PWL dispatch re-costed with the quadratic
     objective.  seqQP: PWL switching sequence + fixed-topology QP, i.e. the SAME
-    post-processing that miGoBuG-ZOH gets (Response 3.4, step iii); without it
+    post-processing that miGoBuG-ZOH gets; without it
     the comparison would be unfair to the MILP."""
     c = {f"PWL{L}_status": r["status_str"], f"PWL{L}_time": r["runtime"],
          f"PWL{L}_J_true": r.get("J_true", np.nan),
@@ -988,7 +984,7 @@ def exp_topology(cfg, cases, out, env):
     g = 1..4 are exactly Configurations II..V of the main benchmark, so they are
     taken from main.csv and not re-run.  This experiment only adds the g in
     cfg["topology_g"] (default [5]): the first g nodes of cfg["topology_nodes"]
-    (G1..G4 of Config V plus G5).  run3 drew fresh random nodes for every g,
+    (G1..G4 of Config V plus G5).  An earlier version drew fresh random nodes for every g,
     which (i) made the rows for different g incomparable and (ii) could produce
     dominated nodes (see P.grid_envelope)."""
     T = Table(out / "topology.csv", ["dataset", "g"])
@@ -1060,7 +1056,7 @@ def exp_sensitivity(cfg, cases, out, env):
 
 
 # ======================================================================
-# 6. ENVIRONMENT + DATA DOCUMENTATION  (R1.8)
+# 6. ENVIRONMENT + DATA DOCUMENTATION
 # ======================================================================
 def document(cfg, folder, days, cases, out):
     import numba, scipy
@@ -1160,7 +1156,7 @@ def main():
                     help="mesh-node cap per continuation solve (cheaper failures)")
     ap.add_argument("--reuse-any-formulation", action="store_true",
                     help="with --reuse-miqp: reuse Gurobi rows solved with another MIQP formulation "
-                         "(run3 = topology binaries). For miGoBuG tuning runs only, not for final tables")
+                         "(e.g., topology binaries). For miGoBuG tuning runs only, not for final tables")
     ap.add_argument("--max-halvings", type=int, default=None,
                     help="stop after the step has been halved this many times (default 12)")
     ap.add_argument("--no-mesh-reset", action="store_true", help="no retry on the uniform mesh after a failure")
@@ -1196,7 +1192,7 @@ def main():
                     help="step_preference.csv of an earlier run: start each case from its logged "
                          "step count (the logged time of the earlier attempts is kept in t_total)")
     ap.add_argument("--keep-run3-nodes", action="store_true",
-                    help="use run3's Configuration V nodes (dominated G4) so that run3's "
+                    help="use the earlier Configuration V nodes (dominated G4) so that earlier "
                          "Gurobi bounds can be reused; for tuning the continuation only")
     ap.add_argument("--redo-pwl", action="store_true",
                     help="re-solve MILP-PWL even when --reuse-miqp copies the Gurobi rows "

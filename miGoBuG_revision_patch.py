@@ -1,20 +1,18 @@
 """
 miGoBuG_revision_patch.py
 =========================
-Add-on to miGoBuG.py for the TSG revision.  It does NOT change the
-mi-Alt-PMP solver itself; it adds what the response letter promises:
+Add-on to miGoBuG.py.  It does NOT change the mi-Alt-PMP solver itself; it adds:
 
-  * one benchmark model (convex MIQP) used for EVERY method      -> R1.1, R3.4
-  * Gurobi status / incumbent / best bound / MIP gap             -> R2.3
-  * MILP with piecewise-linear costs (L segments)                -> R1.3
-  * evaluate_sequence(): fix a switching sequence, hard
-    constraints, same objective -> certified gap vs. J_LB        -> R3.4
-  * continuation loop that records failed steps, mesh size,
-    timing, and a tight-tolerance "polish" solve                 -> R2.1, R3.6
-  * PMP diagnostics: clipping, slack active-set, balance
-    residual, fractionality, energy/ramp violation               -> Table VI
-  * numerical check of condition (C)                             -> Prop. 2
-  * helpers for topology scaling (g nodes) and horizon scaling   -> R2.2, R1.4
+  * one benchmark model (convex MIQP) used for EVERY method
+  * Gurobi status / incumbent / best bound / MIP gap
+  * MILP with piecewise-linear costs (L segments)
+  * evaluate_sequence(): fix a switching sequence, hard constraints, same objective
+  * continuation loop that records failed steps, mesh size, timing, and a
+    tight-tolerance "polish" solve
+  * PMP diagnostics: clipping, slack active-set, balance residual, fractionality,
+    energy/ramp violation
+  * numerical check of the convexity condition of Appendix A
+  * helpers for topology scaling (g nodes) and horizon scaling
 
 Usage sketch (see benchmark_case at the bottom):
 
@@ -136,7 +134,7 @@ def build_benchmark(case: Case, env: gp.Env, pwl_L: int | None = None,
     relaxation is the same (the simplex over topologies projects onto the
     cube [0,1]^g), so the root bound is unchanged; branching on switches
     gives balanced branches instead of weak "topology m off" branches.
-    "topology": run3 formulation.  "auto": switch if exact, else topology.
+    "topology": one binary per topology (used in the paper).  "auto": switch if exact, else topology.
     """
     N, s, z, g, k, dt = case.N, case.s, case.z, case.g, case.k, case.dt
     eta_s = case.eta_s
@@ -307,7 +305,7 @@ def solve_benchmark(case: Case, time_limit=3600.0, mip_gap=1e-4, threads=None,
     """MIQP (pwl_L=None) or MILP-PWL.  Returns status, J_inc, J_LB, gap,
     J_true (re-evaluated with the true quadratic objective), time.
 
-    binaries: "topology" (run3) | "switch" | "auto" (see build_benchmark).
+    binaries: "topology" | "switch" | "auto" (see build_benchmark).
     miqcp_method: Gurobi MIQCPMethod (None = default -1 automatic;
         0 = QCP relaxation at every node, 1 = linearized outer approximation).
     mip_start_seq: topology sequence used as MIP start (e.g. miGoBuG's).
@@ -443,7 +441,7 @@ def run_continuation(case: Case, eps_array, fix_ramp_units=True, snapshots=(),
     current scheduled epsilon is halved up to `max_halvings` times; the next
     scheduled epsilon starts again with the FULL step from the last converged
     solution.  Once stalled, every later target repeats max_halvings+1 failed
-    solves from an ever larger distance: run3 spent >1000 s in such loops and
+    solves from an ever larger distance: an earlier run spent >1000 s in such loops and
     never recovered.
 
     step_control="persistent" (default): a step size h (in log epsilon) is
@@ -462,9 +460,9 @@ def run_continuation(case: Case, eps_array, fix_ramp_units=True, snapshots=(),
     bc_tol: absolute tolerance on the boundary conditions (kWh for energies,
     kW for the initial diesel power); None = solve_bvp default (= tol).
     mesh_density: initial uniform mesh has mesh_density*(N-1)+1 nodes
-    (1 = one node per ZOH sample, as in run3).
+    (1 = one node per ZOH sample).
 
-    max_nodes: cap on collocation nodes per solve.  In run3 no converged solve
+    max_nodes: cap on collocation nodes per solve.  In an earlier run no converged solve
     used more than 164 nodes, while failed solves ran to 50000 nodes, which is
     what made failures expensive."""
     if step_control == "fisher":
@@ -808,7 +806,7 @@ def tighten_final(case: Case, cont: dict, tols=(0.3, 0.1), bc_tol=1e-2, max_node
 
 
 def polish(case: Case, cont: dict, tol=1e-3, bc_tol=1e-3, max_nodes=50000):
-    """Re-solve at the last epsilon with a tight tolerance (Response 2.1).
+    """Re-solve at the last epsilon with a tight tolerance.
     The continuation itself uses tol = 5-15 and bc_tol = tol, which is far
     too loose to claim that (18)-(21) and (12) hold."""
     sol0, eps = cont["sol"], cont["eps_last"]
@@ -943,7 +941,7 @@ def boltzmann(H, eps_pi):
 
 
 def pmp_diagnostics(case: Case, sol, eps, W):
-    """Numbers for Table VI: share of nodes with clipping / active slack,
+    """Diagnostics: share of nodes with clipping / active slack,
     power-balance residual of the selected mode, fractionality, violations."""
     s, z = case.s, case.z
     eps_pi = eps * 1e4
@@ -1235,7 +1233,7 @@ def grid_envelope(Delta, eta_g, breakeven, X_g=None, y_max=2.5, n=2501):
 
 def make_grid_nodes(g, Delta0, eta0=0.95, price0=1.0, rng=None,
                     eta_spread=0.02, price_spread=0.3, admissible=None):
-    """Synthetic grid connections for the topology-scaling study (Table VII).
+    """Synthetic grid connections for the topology-scaling study.
     Returns X_g (all 2^g combos unless `admissible` filters rows), eta_g,
     Delta, base_grid_costs.  Report the drawn values in the paper."""
     rng = np.random.default_rng(0) if rng is None else rng
