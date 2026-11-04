@@ -100,9 +100,10 @@ for c in CONFIGS:
     # bold: the method with the shorter median execution time
     minlp_best = st.median(tm) < st.median(tot)
     t_minlp = f"\\textbf{{{trange}}}" if minlp_best else trange
-    t_mig = f"{st.median(tot):.1f}" if minlp_best else f"\\textbf{{{st.median(tot):.1f}}}"
+    t_mig = f"{st.median(tot):.1f} ({max(tot):.1f})"
+    t_mig = t_mig if minlp_best else f"\\textbf{{{t_mig}}}"
     table5.append(f"{c} & {k} & {binaries} & {opt} / {10 - opt} & {t_minlp} & {max(num(r, 'MIQP_gap_pct') for r in R):.2f} & "
-                  f"{t_mig} ({max(tot):.1f}) & {fx(st.median(d), 3)} ({fx(max(d), 3)})\\\\")
+                  f"{t_mig} & {fx(st.median(d), 3)} ({fx(max(d), 3)})\\\\")
 
 tex = ["% Table III", *table3, "", "% Table IV", *table4, "", "% Table V", *table5, ""]
 (folder / "tables.tex").write_text("\n".join(tex))
