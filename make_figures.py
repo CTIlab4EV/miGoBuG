@@ -1,18 +1,11 @@
-"""Figs. 3-8 of the revised manuscript from ONE results folder, in the style of
-miGoBuG_plot.ipynb (LaTeX text, Computer Modern, same colors, hatches and layout).
-Needs LaTeX (text.usetex):
+"""Figures of the paper from ONE results folder (needs LaTeX, text.usetex):
 
     python make_figures.py reference_results
 
 Writes figures_revised/:
-  Fig3-5 (+ IV, V)  Results_Objective_Config_<C>.svg/.pdf   objective per dataset
-  Fig6              Results_ExecTime.svg/.pdf                 execution time, Configurations I-V
-  Fig7              Results_Benchmark_Config_I_<n>_<panel>.svg/.pdf   (Config I, dataset 1)
-  Fig8              Results_Benchmark_Config_III_<n>_<panel>.svg/.pdf (Config III, dataset 3)
-  preview_*.png     stacked previews of Figs. 7 and 8, and the data plotted (*.csv)
-Legends say MINLP where the original said MIP.  The continuous miGoBuG objective
-is not shown in the bar charts: it belongs to the continuous problem, not to the
-ZOH problem that Gurobi solves.
+  Figs. 3-4  Results_ExecTime_*.svg/.pdf          execution time per dataset
+  Figs. 5-7  Results_Benchmark_Config_<C>_*.svg/.pdf  trajectories (I: dataset 1, III: dataset 3, V: dataset 10)
+  preview_*.png  stacked previews of Figs. 5-7, and the data plotted (*.csv)
 """
 import csv
 import sys
@@ -24,7 +17,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.patches import Patch
-from matplotlib.ticker import MaxNLocator, ScalarFormatter
+from matplotlib.ticker import ScalarFormatter
 
 import run_revision_benchmarks as R
 
@@ -47,82 +40,16 @@ def save(fig, name):
 
 
 # =====================================================================
-# Figs. 3-5 (and Configurations IV, V): objective value per dataset
+# Common style
 # =====================================================================
 plt.rcParams.update({'text.usetex': True, 'font.family': 'serif', 'font.serif': ['Computer Modern Roman'],
                      'font.size': 22, 'figure.facecolor': 'white', 'axes.facecolor': 'white',
-                     'axes.linewidth': 1.7})   # frame as thick on the page as in Figs. 7-9 (1.5 at their scale)
-styles = {
-    'ALT_PMP_ZOH':  {'c': '#92c5de', 'h': '//',   'lbl': 'miGoBuG ZOH', 'k': 'J_miGoBuG_ZOH'},
-    'MIP':          {'c': '#fddbc7', 'h': 'o',    'lbl': 'MINLP',       'k': 'MIQP_J_inc'},
-}
-legend_patches_obj = [Patch(facecolor=v['c'], edgecolor='black', hatch=v['h'], label=v['lbl']) for v in styles.values()]
+                     'axes.linewidth': 1.7})   # frame as thick on the page as in Figs. 5-7 (1.5 at their scale)
 xt = [rf"\textsc{{Case}} {i}" for i in cases]
 x = np.arange(len(cases))
-with open(out / "objectives.csv", "w", newline="") as f:
-    w = csv.writer(f); w.writerow(["config", "dataset"] + [v['lbl'] for v in styles.values()])
-    for c in CFG:
-        for i in cases:
-            w.writerow([c, i] + [num(by[(c, i)], v['k']) for v in styles.values()])
-
-width = 0.3
-for c in CFG:
-    fig, ax = plt.subplots(figsize=(14, 5))
-    ax.grid(True, axis='y', linestyle=':', color='gray', alpha=0.6, zorder=0)
-    allv = []
-    for j, v in enumerate(styles.values()):
-        y = np.array([num(by[(c, i)], v['k']) for i in cases])
-        allv.append(y)
-        ax.bar(x + (j - (len(styles) - 1) / 2) * width, y, width, facecolor=v['c'], edgecolor='black', hatch=v['h'], zorder=3)
-    allv = np.concatenate(allv)
-    lo, hi = np.nanmin(allv), np.nanmax(allv)
-    ax.set_ylim(0.9 * lo, hi + 0.30 * (hi - 0.9 * lo))            # headroom for the legend
-    fmt = ScalarFormatter(useMathText=True); fmt.set_scientific(True); fmt.set_powerlimits((7, 7))
-    ax.yaxis.set_major_formatter(fmt)
-    ax.set_ylabel(r'\textsc{Objective Value}')
-    ax.set_xticks(x); ax.set_xticklabels(xt, fontsize=18)
-    ax.set_xlim(x[0] - 0.5, x[-1] + 0.5)
-    ax.legend(handles=legend_patches_obj, loc='upper center', ncol=3, edgecolor='black',
-              framealpha=1.0, fontsize=18, columnspacing=1.0)
-    for s in ax.spines.values():
-        s.set_edgecolor('black')
-    fig.tight_layout()
-    save(fig, f"ObjVal_Plot_Config{c}_Results")             # file name used in the manuscript
-
-# two column-width figures in the style of the original Figs. 3-5 (one panel per configuration,
-# 14 x 5 in each, legend inside the top panel): Configurations I-II and III-V
-def objective_figure(cfgs, name):
-    fig, axs = plt.subplots(len(cfgs), 1, figsize=(14, 4.2 * len(cfgs)), facecolor="white")
-    for ax, c in zip(axs, cfgs):
-        ax.grid(True, axis='y', linestyle=':', color='gray', alpha=0.6, zorder=0)
-        allv = []
-        for j, v in enumerate(styles.values()):
-            y = np.array([num(by[(c, i)], v['k']) for i in cases])
-            allv.append(y)
-            ax.bar(x + (j - (len(styles) - 1) / 2) * width, y, width, facecolor=v['c'], edgecolor='black', hatch=v['h'], zorder=3)
-        allv = np.concatenate(allv)
-        lo, hi = np.nanmin(allv), np.nanmax(allv)
-        ax.set_ylim(0.9 * lo, hi)                             # the axis ends at the largest objective value
-        fmt = ScalarFormatter(useMathText=True); fmt.set_scientific(True); fmt.set_powerlimits((7, 7))
-        ax.yaxis.set_major_formatter(fmt)                     # x10^7 above the axis, as in the original
-        ax.yaxis.set_major_locator(MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10], min_n_ticks=4))   # about four ticks per panel
-        ax.set_ylabel(r'\textsc{Objective Value}')
-        ax.set_title(rf'\textbf{{Configuration {c}: {NAMES[c]}}}', fontsize=24, pad=10)
-        ax.set_xticks(x); ax.set_xticklabels(xt, fontsize=18)
-        ax.set_xlim(x[0] - 0.5, x[-1] + 0.5)
-        ax.legend(handles=legend_patches_obj, loc='upper right', ncol=5, edgecolor='black',
-                  framealpha=1.0, fontsize=16, columnspacing=1.0, handlelength=1.8)
-        for sp in ax.spines.values():
-            sp.set_edgecolor('black')
-    fig.tight_layout(h_pad=1.5)
-    save(fig, name)
-
-
-objective_figure(["I", "II"], "ObjVal_Plot_ConfigI_II_Results")          # Fig. 3
-objective_figure(["III", "IV", "V"], "ObjVal_Plot_ConfigIII_V_Results")  # Fig. 4
 
 # =====================================================================
-# Fig. 6: execution time, Configurations I-V
+# Figs. 3-4: execution time, Configurations I-V
 # =====================================================================
 with open(out / "runtimes.csv", "w", newline="") as f:
     w = csv.writer(f); w.writerow(["config", "dataset", "gurobi_status", "gurobi_time_s", "migobug_time_s"])
@@ -138,7 +65,7 @@ offsets_time_2 = np.array([-0.5, 0.5]) * width_time
 MIP_SCALE_I = 100                               # Configuration I: MINLP bars scaled for visibility
 CAP = 15.0                                      # visual cap [s]; longer bars are labelled with their time
 def time_figure(cfgs, name):
-    """original Fig. 6 style: one panel per configuration, 14 x 3.4 in each, one legend on top"""
+    """one panel per configuration, 14 x 3.4 in each, one legend on top"""
     fig_time, axes_time = plt.subplots(len(cfgs), 1, figsize=(14, 3.6 * len(cfgs)), facecolor='white')
     for idx, c in enumerate(cfgs):
         ax_t = axes_time[idx]
@@ -185,12 +112,12 @@ def time_figure(cfgs, name):
     save(fig_time, name)
 
 
-time_figure(["I", "II"], "Results_ExecTime_I_II")            # Fig. 5
-time_figure(["III", "IV", "V"], "Results_ExecTime_III_V")  # Fig. 6
+time_figure(["I", "II"], "Results_ExecTime_I_II")            # Fig. 3
+time_figure(["III", "IV", "V"], "Results_ExecTime_III_V")  # Fig. 4
 
 
 # =====================================================================
-# Figs. 7 and 8: trajectories (plot() of miGoBuG_plot.ipynb, separate figure per panel)
+# Figs. 5-7: trajectories (plot() of miGoBuG_plot.ipynb, separate figure per panel)
 # =====================================================================
 def darken_color(color, factor=0.7):
     rgb = mcolors.to_rgb(color)
@@ -382,7 +309,7 @@ def gurobi_traj(c, i):
 
 
 cfg = dict(R.CFG); _, days = R.load_days(cfg); kd = cfg["days_per_case"]
-for c, i in (("I", 1), ("III", 3), ("V", 10)):   # V-10: Fig. 9 (version 2), same style as Figs. 7-8
+for c, i in (("I", 1), ("III", 3), ("V", 10)):   # Figs. 5, 6 and 7
     case = R.make_case(cfg, R.net_load(cfg, days[(i - 1) * kd: i * kd]), c)
     G = gurobi_traj(c, i)
     M = np.load(folder / "traj" / f"main_{c}_case{i}_miGoBuG.npz")

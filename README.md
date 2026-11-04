@@ -7,13 +7,14 @@ Code, data, and configuration for the paper
 > Benchmark of Microgrid Energy Management (miGoBuG)," *IEEE Transactions on Smart Grid*
 > (under review, manuscript TSG-01638-2026).
 
-The package contains three methods:
+The package contains four groups of methods:
 
 - **miGoBuG**: the mi-Alt-PMP solver with entropy-regularized homotopy;
 - **MINLP**: the benchmark model solved by Gurobi, a convex mixed-integer quadratic program in its
   zero-order-hold (ZOH) transcription;
 - **MILP-PWL**: the same model with $L = 8, 16, 32$ piecewise-linear cost segments, with and
-  without re-optimizing the dispatch of its switching sequence in the MINLP ("+ QP").
+  without re-optimizing the dispatch of its switching sequence in the MINLP ("+ QP");
+- **heuristic baselines**: MS MINTOC, SUR NLP, and Adjoint NLP.
 
 It also contains the net-load profile, the configuration of all five test systems, the
 continuation schedule of every case, and the results reported in the paper.
@@ -24,6 +25,7 @@ continuation schedule of every case, and the results reported in the paper.
 |---|---|
 | `miGoBuG.py` | mi-Alt-PMP solver (Numba kernels, TPBVP collocation); does not use Gurobi |
 | `miGoBuG_revision_patch.py` | benchmark model (ZOH transcription), Gurobi MINLP/MILP, fixed-sequence QP, continuation loop, diagnostics, regularization threshold of Appendix A |
+| `baselines.py` | heuristic baselines MS MINTOC, SUR NLP, and Adjoint NLP, with continuous relaxations of the benchmark model solved by Gurobi |
 | `run_revision_benchmarks.py` | driver for all experiments; all parameters are in `CFG` at the top |
 | `run_gurobi_cases.py` | MINLP for selected cases (e.g., in a separate process) |
 | `run_pwl_cases.py` | MILP-PWL benchmarks ($L = 8, 16, 32$) for selected configurations |
@@ -44,7 +46,7 @@ pip install -r requirements.txt
 ```
 
 **Gurobi licence.** No licence is included. miGoBuG itself (the continuous-time solver) runs
-without Gurobi. A Gurobi licence is needed for the MINLP and MILP benchmarks and for the
+without Gurobi. A Gurobi licence is needed for the MINLP and MILP benchmarks, the heuristic baselines, and the
 fixed-sequence QP that evaluates every switching sequence in the benchmark
 model; the size-limited licence shipped with `pip install gurobipy` is too small for these
 models. Free academic licences are available from Gurobi. Either install a `gurobi.lic`, or set a
@@ -81,8 +83,8 @@ python threshold_summary.py reference_results/threshold_condC.csv
 
 ## Reproducing the paper
 
-1. **Main benchmark** (MINLP with a 3600 s limit, MILP-PWL for Configuration III, miGoBuG; Gurobi needed). With the
-   time limit, the 24 instances that reach it take about 24 h in total:
+1. **Main benchmark** (MINLP with a 3600 s limit, MILP-PWL for Configuration III, miGoBuG, heuristic baselines; Gurobi
+   needed). With the time limit, the 24 instances that reach it take about 24 h in total:
 
    ```bash
    python run_revision_benchmarks.py --exp main --step-pref config/per_case_steps.csv \
@@ -90,7 +92,8 @@ python threshold_summary.py reference_results/threshold_condC.csv
    ```
 
    The run can be stopped and restarted with the same `--out`; finished rows are kept.
-   `--miqp-limit` shortens the Gurobi time limit for a quick check.
+   `--miqp-limit` shortens the Gurobi time limit for a quick check, and `--no-baselines` skips the
+   heuristic baselines.
 
 2. **MILP-PWL** for the remaining configurations (Configuration III is solved in step 1), then
    merged into `results/main/main.csv`:
@@ -147,8 +150,9 @@ Configurations II to V are defined in `CFG` of `run_revision_benchmarks.py`;
 
 `reference_results/main.csv` contains, for every configuration and dataset, the objective, status,
 best bound, MIP gap, and runtime of the MINLP solved by Gurobi, the objective and runtime of
-miGoBuG with its switching sequence evaluated in the same benchmark model (`J_miGoBuG_ZOH`), and
-the MILP-PWL benchmarks with $L = 8, 16, 32$ segments. `reference_results/traj/` holds the
+miGoBuG with its switching sequence evaluated in the same benchmark model (`J_miGoBuG_ZOH`), the
+MILP-PWL benchmarks with $L = 8, 16, 32$ segments, and the heuristic baselines (`MINTOC_J`, `SUR_J`,
+`Adjoint_J`). `reference_results/traj/` holds the
 trajectories of miGoBuG and of the MINLP, and `threshold_condC.csv` the regularization threshold
 of Appendix A along the continuation.
 

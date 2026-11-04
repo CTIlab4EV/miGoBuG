@@ -1,6 +1,6 @@
-"""Tables R1, R2, R4 of the response letter from ONE results folder.
+"""Tables of the paper from ONE results folder.
 
-    python3 make_tables.py results/final
+    python make_tables.py reference_results
 
 Writes <folder>/summary_per_case.csv and letter/tables_generated.tex (LaTeX
 rows to paste into the letter).  miGoBuG time = total time used for the
@@ -91,8 +91,8 @@ for r in sorted((r for r in rows if r["config"] == "III"), key=lambda r: int(r["
                f"{fx(num(r, 'gap_vs_inc_pct'), 4)} & {fx(num(r, 'gap_certified_pct'), 4)} & {time_cell(r)}\\\\")
 tex.append("")
 
-# ---------------------------------------------------------------- Table VI (letter: Response 2.2)
-tex.append("% ---- Table VI rows (per configuration) ----")
+# ---------------------------------------------------------------- Table V
+tex.append("% ---- Table V rows (per configuration) ----")
 restarted = []
 for c in CONFIGS:
     R = [r for r in rows if r["config"] == c]
@@ -114,30 +114,46 @@ if restarted:
     tex.append("% restarted cases (total (final run + earlier runs)): " + "; ".join(restarted))
 tex.append("")
 
-# ---------------------------------------------------------------- Table IV (letter: Response 1.3)
-tex.append("% ---- Table IV rows (Configuration III, MINLP vs MILP vs miGoBuG) ----")
-R = [r for r in rows if r["config"] == "III"]
-if len(R) == 10 and all(complete(r) for r in R):
-    def line(name, J_key, t_key, ref=True):
-        J = [num(r, J_key) for r in R]
-        t = [num(r, t_key) for r in R]
-        d = [delta(j, num(r, "MIQP_J_inc")) for j, r in zip(J, R)]
-        dcell = "0 (reference)" if not ref else f"{fx(st.mean(d), 3)} ({fx(min(d), 3)} to {fx(max(d), 3)})"
-        return f"{name} & {st.mean(J) / 1e7:.4f} & {dcell} & {ft(st.median(t))} ({ft(max(t))})\\\\"
-    tex.append(line("MINLP (Gurobi)$^{a}$", "MIQP_J_inc", "MIQP_time", ref=False))
-    for L in (8, 16, 32):
-        tex.append(line(f"MILP-PWL, $L={L}$", f"PWL{L}_J_true", f"PWL{L}_time"))
-    for L in (16, 32):
-        tex.append(line(f"MILP-PWL, $L={L}$, sequence + QP$^{{b}}$", f"PWL{L}_J_seqQP", f"PWL{L}_time_seqQP"))
-    J = [num(r, "J_miGoBuG_ZOH") for r in R]
-    d = [num(r, "gap_vs_inc_pct") for r in R]
-    tot = [times(r)[0] for r in R]
-    tex.append(f"\\ZOH{{}} (continuation + QP$^{{b}}$) & {st.mean(J) / 1e7:.4f} & "
-               f"{fx(st.mean(d), 3)} ({fx(min(d), 3)} to {fx(max(d), 3)}) & {ft(st.median(tot))} ({ft(max(tot))})\\\\")
-    opt = sum(r["MIQP_status"] == "optimal" for r in R)
-    tex.append(f"% footnote a: optimality proven in {opt} of 10 cases; 3600 s limit reached in {10 - opt}.")
-else:
-    tex.append("% Configuration III not complete yet")
+# ---------------------------------------------------------------- Table IV (all methods against the MINLP)
+tex.append("% ---- Table IV rows: mean (maximum) gap [%] and median execution time [s] ----")
+METHODS = [("miGoBuG ZOH", "J_miGoBuG_ZOH", "t_total", None),
+           ("MILP-PWL, $L=8$", "PWL8_J_true", "PWL8_time", "PWL8_status"),
+           ("MILP-PWL, $L=16$", "PWL16_J_true", "PWL16_time", "PWL16_status"),
+           ("MILP-PWL, $L=32$", "PWL32_J_true", "PWL32_time", "PWL32_status"),
+           ("MILP-PWL, $L=16$ + QP", "PWL16_J_seqQP", "PWL16_time_seqQP", "PWL16_status"),
+           ("MILP-PWL, $L=32$ + QP", "PWL32_J_seqQP", "PWL32_time_seqQP", "PWL32_status"),
+           ("MS MINTOC", "MINTOC_J", "MINTOC_time", None),
+           ("SUR NLP", "SUR_J", "SUR_time", None),
+           ("Adjoint NLP", "Adjoint_J", "Adjoint_time", None)]
+
+
+def fgap(x):
+    return f"{x:.3f}" if abs(x) < 10 else f"{x:.2f}"
+
+
+def ftime(x):
+    return f"{x:.2f}" if x < 1 else f"{x:.1f}" if x < 100 else f"{x:.0f}"
+
+
+stats = {}
+for name, J_key, t_key, status_key in METHODS:
+    for c in CONFIGS:
+        R = [r for r in rows if r["config"] == c]
+        d = [delta(num(r, J_key), num(r, "MIQP_J_inc")) for r in R]
+        limit = status_key is not None and any(r.get(status_key) not in ("optimal", "", None) for r in R)
+        stats[name, c] = (st.mean(d), max(d), st.median(num(r, t_key) for r in R), limit)
+lowest = {c: min(stats[m[0], c][0] for m in METHODS) for c in CONFIGS}
+for idx, (name, *_) in enumerate(METHODS):
+    if idx in (1, 6):
+        tex.append("\\midrule")
+    cells = []
+    for c in CONFIGS:
+        mean, worst, t, limit = stats[name, c]
+        m = fgap(mean)
+        if c != "I" and abs(mean - lowest[c]) < 5e-4:      # bold: lowest mean gap of the configuration
+            m = "\\textbf{" + m + "}"
+        cells += [f"{m} ({fgap(worst)})", ftime(t) + ("$^\\dagger$" if limit else "")]
+    tex.append(name + " & " + " & ".join(cells) + " \\\\")
 
 Path("letter").mkdir(exist_ok=True)
 Path("letter/tables_generated.tex").write_text("\n".join(tex) + "\n")

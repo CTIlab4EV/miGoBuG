@@ -54,6 +54,7 @@ import pandas as pd
 
 import miGoBuG as M
 import miGoBuG_revision_patch as P
+import baselines
 
 # ======================================================================
 # 1. PARAMETERS  (written to config.json in every output folder)
@@ -665,6 +666,33 @@ def run_miqp(case, cfg, out, tag, env, pwl_L=None, limit=None):
     return r
 
 
+# --- heuristic baselines (baselines.py), costed in the benchmark model ---
+def run_baselines(case, env, methods=("MINTOC", "SUR", "Adjoint")):
+    args = (case.p_net, case.E_init, case.E_target, case.E_min, case.E_max, case.P_dg_init,
+            case.S, case.Z, case.B, case.Delta, case.eta_s, case.eta_dg, case.eta_g,
+            case.X_g, case.base_grid_costs, case.dt)
+    bounds = dict(P_s_ub=case.P_s_ub, P_g_ub=case.P_g_ub, P_dg_lb=case.P_dg_lb,   # same bounds as the
+                  P_dg_ub=case.P_dg_ub, U_ub=case.U_ub)                             # benchmark model
+    out = {}
+    for name, fn in [("MINTOC", baselines.solve_ems_ms_mintoc), ("SUR", baselines.solve_ems_sur_sos1),
+                     ("Adjoint", baselines.solve_ems_hybrid_pmp)]:
+        if name not in methods:
+            continue
+        try:
+            t0 = time.time()
+            r = fn(*args, bounds=bounds)
+            t = time.time() - t0
+            if not r.get("success"):
+                out[name] = dict(status="failed", time=t)
+                continue
+            ev = P.evaluate_sequence(case, r["m_star"], env=env)
+            out[name] = dict(status="ok" if ev["feasible"] else "sequence infeasible",
+                             time=t, J=ev.get("J_true", np.nan),
+                             own_obj_with_penalty=r["obj"] * case.scale)
+        except Exception as e:                       # log, never stop the run
+            out[name] = dict(status=f"error: {e!r}")
+    return out
+
 
 def gap(J, J_LB):
     return P.certified_gap(J, J_LB) if np.isfinite(J) and np.isfinite(J_LB) else np.nan
@@ -721,15 +749,15 @@ def plan_main(cfg, cases, configs):
                 n_miqp += 1
                 n_pwl += len(pw)
                 lines.append(f"  {config:>3}/{ci:<2}  SOLVE MIQP (<= {cfg['miqp_time_limit']:.0f} s): {why}"
-                             + (f"; PWL L={pw}" if pw else ""))
+                             + (f"; PWL L={pw}" if pw else "") + "; baselines")
     print("\n".join(lines))
     print(f"\nGurobi MIQP solves: {n_miqp} (each up to {cfg['miqp_time_limit']:.0f} s); "
           f"MILP-PWL solves: {n_pwl} (each up to {cfg['pwl_time_limit']:.0f} s).")
     print(f"Worst case Gurobi time: {(n_miqp * cfg['miqp_time_limit'] + n_pwl * cfg['pwl_time_limit']) / 3600:.1f} h "
-          f"(plus miGoBuG). Nothing has been run.")
+          f"(plus miGoBuG and baselines). Nothing has been run.")
 
 
-def exp_main(cfg, cases, configs, out, env):
+def exp_main(cfg, cases, configs, out, env, with_baselines=True):
     T = Table(out / "main.csv", ["config", "case"])
     TC = Table(out / "condC.csv", ["tag", "step"])
     eps = None                         # per-k schedule (cont_settings)
@@ -739,7 +767,7 @@ def exp_main(cfg, cases, configs, out, env):
                 continue
             tag = f"main_{config}_case{ci}"
             try:
-                _main_row(T, TC, cfg, eps, config, ci, p_net, out, env, tag)
+                _main_row(T, TC, cfg, eps, config, ci, p_net, out, env, tag, with_baselines)
             except Exception:
                 _log_error(out, tag)
 
@@ -747,13 +775,13 @@ def exp_main(cfg, cases, configs, out, env):
 REUSE_SOURCE = None
 def _bound_check(row):
     """Gurobi's best bound must not exceed the cost of ANY feasible solution
-    found by any method (miGoBuG, PWL + QP, Gurobi's own
+    found by any method (miGoBuG, MINTOC, SUR, Adjoint, PWL + QP, Gurobi's own
     incumbent).  A violation means the bound is not valid (numerical trouble).
     bound_consistent = True is a necessary condition only, not a proof."""
     lb = row.get("MIQP_J_LB")
     if lb is None or not np.isfinite(lb):
         return
-    costs = [row.get(c) for c in ("MIQP_J_inc", "J_miGoBuG_ZOH")]
+    costs = [row.get(c) for c in ("MIQP_J_inc", "J_miGoBuG_ZOH", "MINTOC_J", "SUR_J", "Adjoint_J")]
     costs += [row.get(f"PWL{L}_J_seqQP") for L in (8, 16, 32)]
     costs += [row.get(f"PWL{L}_J_true") for L in (8, 16, 32)]
     costs = [float(c) for c in costs if c is not None and np.isfinite(c)]
@@ -782,13 +810,13 @@ def pwl_columns(case, r, L, J_LB, env):
 
 REUSE = {}          # (config, case) -> row of a previous main.csv  (--reuse-miqp)
 REDO_PWL = False    # --redo-pwl: re-solve PWL even when Gurobi rows are reused
-MIGOBUG_ONLY = False  # --migobug-only: never start MIQP / PWL
+MIGOBUG_ONLY = False  # --migobug-only: never start MIQP / PWL / baselines
 DEFER_FIXEDQP = False  # --defer-fixedqp: skip the fixed-topology QP (t_total then excludes it)
 STEP_PREF = {}        # --step-pref: tag -> row of an earlier step_preference.csv
-REUSE_PREFIX = ("MIQP_", "PWL")
+REUSE_PREFIX = ("MIQP_", "PWL", "MINTOC_", "SUR_", "Adjoint_")
 
 
-def _main_row(T, TC, cfg, eps, config, ci, p_net, out, env, tag):
+def _main_row(T, TC, cfg, eps, config, ci, p_net, out, env, tag, with_baselines):
     say(f"[main] {tag}")
     case = make_case(cfg, p_net, config)
     row = dict(config=config, case=ci, N=case.N, g=case.g, k=case.k,
@@ -833,7 +861,7 @@ def _main_row(T, TC, cfg, eps, config, ci, p_net, out, env, tag):
                 row.update(pwl_columns(case, r, L, float(prev["MIQP_J_LB"]), env))
         _bound_check(row)
         T.add(row)
-        say(f"   done (Gurobi reused): gap_cert={row['gap_certified_pct']:.4g}%  "
+        say(f"   done (Gurobi/baselines reused): gap_cert={row['gap_certified_pct']:.4g}%  "
             f"miGoBuG={row.get('t_total', np.nan):.1f}s (cont {row.get('t_continuation', np.nan):.1f} "
             f"tight {row.get('t_tighten', 0):.1f} polish {row.get('t_polish', np.nan):.1f})  steps={row.get('steps')}  "
             f"solves={row.get('bvp_solves')} failed={row.get('failed_steps')}({row.get('t_failed_solves', 0):.0f}s) "
@@ -870,6 +898,12 @@ def _main_row(T, TC, cfg, eps, config, ci, p_net, out, env, tag):
             say(f"   PWL L={L}")
             r = run_miqp(case, cfg, out, tag, env, pwl_L=L, limit=cfg["pwl_time_limit"])
             row.update(pwl_columns(case, r, L, mi["J_LB"], env))
+    if with_baselines:
+        for name, b in run_baselines(case, env).items():
+            row.update({f"{name}_status": b.get("status"), f"{name}_time": b.get("time"),
+                        f"{name}_J": b.get("J", np.nan),
+                        f"{name}_own_obj": b.get("own_obj_with_penalty", np.nan),
+                        f"{name}_gap_certified_pct": gap(b.get("J", np.nan), mi["J_LB"])})
     _bound_check(row)
     T.add(row)
     say(f"   done: gap_cert={row.get('gap_certified_pct'):.4g}%  bound_consistent={row.get('bound_consistent')}  "
@@ -1110,8 +1144,9 @@ def main():
     ap.add_argument("--plan", action="store_true",
                     help="print which Gurobi solves the main experiment would run, then exit")
     ap.add_argument("--threads", type=int)
+    ap.add_argument("--no-baselines", action="store_true")
     ap.add_argument("--reuse-miqp", default=None,
-                    help="main.csv of an earlier run: copy its Gurobi and PWL "
+                    help="main.csv of an earlier run: copy its Gurobi, PWL and baseline "
                          "columns instead of re-solving (only miGoBuG is re-run)")
     ap.add_argument("--profile", choices=["original", "run3", "accurate", "fast", "fast_tight"],
                     default=None,
@@ -1277,7 +1312,7 @@ def main():
                     f"with {cfg['miqp_time_limit']:g} s")
                 continue                       # re-solve with the longer limit
             REUSE[(r["config"], int(r["case"]))] = r.to_dict()
-        say(f"reusing Gurobi results for {len(REUSE)} rows from {a.reuse_miqp}")
+        say(f"reusing Gurobi/baseline results for {len(REUSE)} rows from {a.reuse_miqp}")
     if a.plan:
         plan_main(cfg, cases, [c for c in cfg["configs"] if c in (a.configs or cfg["configs"])])
         return
@@ -1290,7 +1325,7 @@ def main():
     for e in a.exp:
         try:
             if e == "main":
-                exp_main(cfg, cases, a.configs, out, env)
+                exp_main(cfg, cases, a.configs, out, env, with_baselines=not a.no_baselines)
             elif e == "horizon":
                 exp_horizon(cfg, days, out, env)
             elif e == "topology":

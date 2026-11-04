@@ -1,4 +1,4 @@
-"""Gurobi MINLP (convex MIQP) for selected cases,
+"""Gurobi MIQP (+ the MINTOC / SUR / Adjoint baselines) for selected cases,
 outside the main driver, e.g. in a container with its own memory limit.
 
 The output folder gets a main.csv in the same format as the driver's, so it can
@@ -48,6 +48,7 @@ def main():
     ap.add_argument("--nodefile-start", type=float, default=None, help="GB before nodes go to disk (default: CFG)")
     ap.add_argument("--nodefile-dir", default=None, help="folder for node files (default: CFG)")
     ap.add_argument("--soft-mem-limit", type=float, default=None, help="GB; Gurobi stops cleanly above it")
+    ap.add_argument("--no-baselines", action="store_true", help="MIQP only")
     ap.add_argument("--time-limit", type=float, default=None,
                     help="smoke tests only (default: CFG, 3600 s); a shorter limit makes the row non-reusable")
     a = ap.parse_args()
@@ -107,6 +108,12 @@ def main():
             Xm = case.X_g[np.asarray(mi["seq"], int)]
             row["MIQP_usage"] = Xm.mean(axis=0).round(4).tolist()
             row["MIQP_multi_node_share"] = float(np.mean(Xm.sum(axis=1) >= 2))
+        if not a.no_baselines:
+            for name, b in R.run_baselines(case, env).items():
+                row.update({f"{name}_status": b.get("status"), f"{name}_time": b.get("time"),
+                            f"{name}_J": b.get("J", np.nan),
+                            f"{name}_own_obj": b.get("own_obj_with_penalty", np.nan),
+                            f"{name}_gap_certified_pct": R.gap(b.get("J", np.nan), mi["J_LB"])})
         R._bound_check(row)
         row = {k: (json.dumps(v, default=R._js) if isinstance(v, (dict, list, tuple)) else v)
                for k, v in row.items()}
